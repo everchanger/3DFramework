@@ -40,7 +40,7 @@
 // tdogl classes
 #include "Game.hpp"
 
-bool OpenUPNP(RakNet::RakPeerInterface *rakPeer)
+bool OpenUPNP(RakNet::RakPeerInterface *rakPeer, int& externalPort)
 {	
 	struct UPNPDev * devlist = 0;
 	devlist = upnpDiscover(2000, 0, 0, 0, 0, 0);
@@ -53,8 +53,9 @@ bool OpenUPNP(RakNet::RakPeerInterface *rakPeer)
 		{
 			DataStructures::List<RakNet::RakNetSocket2* > sockets;
 			rakPeer->GetSockets(sockets);
+			externalPort = sockets[0]->GetBoundAddress().GetPort();
 			char iport[32];
-			Itoa(sockets[0]->GetBoundAddress().GetPort(),iport,10);
+			Itoa(sockets[0]->GetBoundAddress().GetPort(),iport,10); 
 			char eport[32];
 			strcpy(eport, iport);
 
@@ -114,41 +115,68 @@ int main(int argc, char *argv[]) {
 
 	char str[512];
 	RakNet::RakPeerInterface *peer = RakNet::RakPeerInterface::GetInstance();
+	RakNet::RakPeerInterface *upnpPeer = RakNet::RakPeerInterface::GetInstance();
 	bool isServer;
 	RakNet::Packet *packet;
+	RakNet::SocketDescriptor sd;
 
-	printf("(C) or (S)erver?\n");
-	gets(str);
-	if ((str[0]=='c')||(str[0]=='C'))
-	{
-		RakNet::SocketDescriptor sd;
-		peer->Startup(1,&sd, 1);
-		isServer = false;
-	} else {
-		RakNet::SocketDescriptor sd(SERVER_PORT,0);
-		peer->Startup(MAX_CLIENTS, &sd, 1);
+	std::cout << "Server(1) or Client(0)?" << std::endl;
+	int role = -1;
+	int port = -1;
+
+	std::cin >> role;
+
+	if (role == 1) {
 		isServer = true;
+	} else {
+		isServer = false;
 	}
+	
+	
 
 	if (isServer)
 	{
-		printf("Starting the server.\n");
+		upnpPeer->Startup(1,&sd, 1);
+		
+		upnpPeer->Connect("natpunch.jenkinssoftware.com", SERVER_PORT, 0,0);
+
+		int externalPort = 0;
+		bool success = OpenUPNP(upnpPeer, externalPort);
+
+		if(externalPort==0) {
+			// abort
+			return 0;
+		}
+		
+		std::cout << "Starting the server on port " << externalPort << std::endl;
+
+		RakNet::SocketDescriptor sd(externalPort,0);
+		peer->Startup(MAX_CLIENTS, &sd, 1);
+
 		// We need to let the server accept incoming connections from the clients
 		peer->SetMaximumIncomingConnections(MAX_CLIENTS);
 	} else {
-		printf("Enter server IP or hit enter for 127.0.0.1\n");
-		gets(str);
-		if (str[0]==0){
-			strcpy(str, "natpunch.jenkinssoftware.com");
-		}
-		printf("Starting the client.\n");
-		peer->Connect(str, SERVER_PORT, 0,0);
-	}
 
-	bool success = OpenUPNP(peer);
+		
+		peer->Startup(1,&sd, 1);
+
+		std::cout << "Enter server IP or hit enter for 127.0.0.1" << std::endl;
+		std::string host;
+		std::cin >> host;
+		if (host.length()==0){
+			host = "127.0.0.1";
+		}
+		
+		std::cout<<"Port to connect to?"<<std::endl;
+		std::cin >> port;
+
+		printf("Starting the client.\n");
+		peer->Connect(host.c_str(), port, 0,0);
+	}
 
 	while (1)
 	{
+		RakSleep(100);
 		for (packet=peer->Receive(); packet; peer->DeallocatePacket(packet), packet=peer->Receive())
 		{
 			switch (packet->data[0])
